@@ -1,0 +1,52 @@
+{
+  "manifest_version": 3,
+  "name": "Gömrük Extension",
+  "version": "1.1.1",
+  "description": "PDF-dən mətn oxuyub gömrük saytlarında formları avtomatik dolduran uzantı",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://e-gov.az/*",
+    "https://gbportal.customs.gov.az/*",
+    "https://custom.gov.az/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://e-gov.az/*",
+        "https://gbportal.customs.gov.az/*",
+        "https://custom.gov.az/*"
+      ],
+      "js": ["content.js"]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "libs/*.js",
+        "libs/tesseract-core/*"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
+

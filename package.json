@@ -1,0 +1,22 @@
+{
+  "name": "gomruk-extension",
+  "version": "1.0.0",
+  "description": "Chrome extension for automatically filling customs forms using OCR",
+  "author": "Your Name",
+  "license": "MIT",
+  "keywords": [
+    "chrome-extension",
+    "ocr",
+    "tesseract",
+    "pdf",
+    "customs",
+    "azerbaijan"
+  ],
+  "scripts": {
+    "build": "echo 'No build step required'",
+    "lint": "echo 'Add linting if needed'"
+  },
+  "devDependencies": {},
+  "dependencies": {}
+}
+
