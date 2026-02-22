@@ -244,11 +244,16 @@ async function processWithOCRPages(pdf, pageNumbers) {
     // so standard createWorker('eng') with langPath works without any manual FS writes.
     let worker;
     try {
+        // gzip:false is CRITICAL — default is true, worker appends '.gz' to filename.
+        // We have eng.traineddata (uncompressed), not eng.traineddata.gz.
+        // cacheMethod:'none' skips IndexedDB lookup, goes straight to fetch.
         worker = await Tesseract.createWorker('eng', 1, {
             workerBlobURL: false,
             workerPath: chrome.runtime.getURL('libs/tesseract-worker.min.js'),
             corePath: chrome.runtime.getURL('libs/tesseract-core/'),
             langPath: chrome.runtime.getURL('libs/tesseract-core/'),
+            gzip: false,
+            cacheMethod: 'none',
             logger: m => {
                 if (m.status === 'recognizing text' && m.progress) {
                     showStatus(`OCR: ${Math.round(m.progress * 100)}%`, 'info');
