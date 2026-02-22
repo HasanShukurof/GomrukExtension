@@ -237,25 +237,22 @@ async function processPDF(arrayBuffer) {
 
 // OCR only the specified page numbers
 async function processWithOCRPages(pdf, pageNumbers) {
-    const ENG_CDN = 'https://tessdata.projectnaptha.com/4.0.0_fast/';
     showStatus('OCR başladılır...', 'info');
 
     const worker = await Tesseract.createWorker({
         workerPath: chrome.runtime.getURL('libs/tesseract.min.js'),
         corePath: chrome.runtime.getURL('libs/tesseract-core/tesseract-core.wasm.js'),
-        langPath: ENG_CDN,
+        langPath: chrome.runtime.getURL('libs/tesseract-core/'),
         logger: m => {
             if (m.status === 'recognizing text' && m.progress) {
                 showStatus(`OCR: ${Math.round(m.progress * 100)}%`, 'info');
-            } else if (m.status === 'loading language traineddata') {
-                showStatus('Dil faylı yüklənir...', 'info');
             }
         }
     });
 
     await worker.loadLanguage('eng');
     await worker.initialize('eng');
-    console.log('✅ Tesseract hazırdır');
+    console.log('✅ Tesseract hazırdır (local eng.traineddata)');
 
     let allText = '';
     for (const pageNum of pageNumbers) {
@@ -370,37 +367,24 @@ function injectAndFill(extractedText) {
 
         console.log('📦 Məlumatlar:', { companyName, companyAddress });
 
-        // Find the "2.Göndərən/İxracatçı" section container
-        let senderSection = null;
-        for (const el of document.querySelectorAll('td, th, div, span, b, strong')) {
-            const t = (el.innerText || '').trim();
-            if ((t.includes('2.Göndərən') || t.includes('Göndərən/İxracatçı')) && el.children.length < 4) {
-                senderSection = el.closest('table') || el.closest('div') || el.parentElement;
-                break;
-            }
-        }
-        console.log('📌 Göndərən bölməsi:', senderSection ? 'tapıldı' : 'tapılmadı');
-
-        // Fill a field by matching its label text within a container
-        function fillByLabel(container, labelTexts, value) {
+        // Find all label cells and their corresponding inputs on the page
+        // Strategy: find rows where label=target AND input is empty, pick first match
+        function fillFirstEmptyByLabel(labelTexts, value) {
             if (!value) return false;
-            const scope = container || document;
-            for (const cell of scope.querySelectorAll('td, th, label, span, b')) {
+            for (const cell of document.querySelectorAll('td, th, label, span, b')) {
                 const cellText = (cell.innerText || '').trim();
                 if (!labelTexts.includes(cellText)) continue;
 
-                // Look for input in next sibling or parent's next sibling
                 const candidates = [
                     cell.nextElementSibling,
                     cell.parentElement?.nextElementSibling,
-                    cell.closest('tr')?.querySelector('input, textarea'),
                 ];
                 for (const cand of candidates) {
                     if (!cand) continue;
-                    const inp = cand.tagName === 'INPUT' || cand.tagName === 'TEXTAREA'
+                    const inp = (cand.tagName === 'INPUT' || cand.tagName === 'TEXTAREA')
                         ? cand
-                        : cand.querySelector('input:not([type="hidden"]):not([type="button"]), textarea');
-                    if (inp && !inp.disabled && !inp.readOnly) {
+                        : cand.querySelector('input:not([type="hidden"]):not([type="button"]):not([type="submit"]), textarea');
+                    if (inp && !inp.disabled && !inp.readOnly && !inp.value) {
                         triggerEvents(inp, value);
                         highlight(inp);
                         console.log(`✅ "${cellText}" → "${value}"`);
@@ -408,12 +392,13 @@ function injectAndFill(extractedText) {
                     }
                 }
             }
+            console.warn(`⚠️ Label tapılmadı: ${labelTexts}`);
             return false;
         }
 
         let filled = 0;
-        if (fillByLabel(senderSection, ['Adı'], companyName)) filled++;
-        if (fillByLabel(senderSection, ['Ünvan', 'Unvan'], companyAddress)) filled++;
+        if (fillFirstEmptyByLabel(['Adı'], companyName)) filled++;
+        if (fillFirstEmptyByLabel(['Ünvan', 'Unvan'], companyAddress)) filled++;
 
         console.log(`✅ ${filled} sahə dolduruldu`);
         return filled > 0;
