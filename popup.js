@@ -239,29 +239,29 @@ async function processPDF(arrayBuffer) {
 async function processWithOCRPages(pdf, pageNumbers) {
     showStatus('OCR başladılır...', 'info');
 
-    // Chrome Extension MV3 blocks importScripts(chrome-extension://) from blob workers.
-    // Fix: fetch the worker script content, embed it inline as a blob URL.
-    // Tesseract will then call importScripts(ourBlobUrl) — blob→blob is same-origin, allowed.
-    const workerScriptUrl = chrome.runtime.getURL('libs/tesseract-worker.min.js');
-    const workerRes = await fetch(workerScriptUrl);
-    if (!workerRes.ok) throw new Error(`Worker fetch xətası: ${workerRes.status}`);
-    const workerContent = await workerRes.text();
-    const workerInlineBlob = new Blob([workerContent], { type: 'application/javascript' });
-    const workerInlineBlobUrl = URL.createObjectURL(workerInlineBlob);
+    // Root cause: Tesseract.js v5 internally creates new Worker(blob{importScripts(workerPath)}).
+    // Chrome MV3 blocks importScripts() with chrome-extension:// URLs from blob workers.
+    // Blob-to-blob importScripts also fails in Chrome extension context.
+    //
+    // Solution: Monkey-patch window.Worker to intercept Tesseract's blob worker creation
+    // and redirect it to tesseract-init-worker.js served as a direct chrome-extension:// URL.
+    // chrome-extension:// URL workers CAN freely importScripts other chrome-extension:// URLs.
+    const OriginalWorker = window.Worker;
+    const initWorkerUrl = chrome.runtime.getURL('libs/tesseract-init-worker.js');
 
-    // Similarly, fetch core WASM script and embed inline so blob worker can access it
-    const coreScriptUrl = chrome.runtime.getURL('libs/tesseract-core/tesseract-core.wasm.js');
-    const coreRes = await fetch(coreScriptUrl);
-    if (!coreRes.ok) throw new Error(`Core fetch xətası: ${coreRes.status}`);
-    const coreContent = await coreRes.text();
-    const coreInlineBlob = new Blob([coreContent], { type: 'application/javascript' });
-    const coreInlineBlobUrl = URL.createObjectURL(coreInlineBlob);
+    window.Worker = function(src, opts) {
+        if (typeof src === 'string' && src.startsWith('blob:')) {
+            console.log('🔀 Blob worker → chrome-extension:// worker yönləndirilir');
+            return new OriginalWorker(initWorkerUrl, opts);
+        }
+        return new OriginalWorker(src, opts);
+    };
+    window.Worker.prototype = OriginalWorker.prototype;
 
     let worker;
     try {
         worker = await Tesseract.createWorker('eng', 1, {
-            workerPath: workerInlineBlobUrl,
-            corePath: coreInlineBlobUrl,
+            corePath: chrome.runtime.getURL('libs/tesseract-core/tesseract-core.wasm.js'),
             langPath: chrome.runtime.getURL('libs/tesseract-core/'),
             logger: m => {
                 if (m.status === 'recognizing text' && m.progress) {
@@ -288,9 +288,8 @@ async function processWithOCRPages(pdf, pageNumbers) {
 
         return allText;
     } finally {
+        window.Worker = OriginalWorker;
         if (worker) await worker.terminate();
-        URL.revokeObjectURL(workerInlineBlobUrl);
-        URL.revokeObjectURL(coreInlineBlobUrl);
     }
 }
 
