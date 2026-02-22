@@ -79,9 +79,12 @@ processBtn.addEventListener('click', async () => {
 
         // Send extracted text to content script
         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            if (tabs[0] && (tabs[0].url.includes('e-gov.az') || tabs[0].url.includes('gbportal.customs.gov.az') || tabs[0].url.includes('custom.gov.az'))) {
+            if (tabs[0] && (tabs[0].url.includes('e-gov.az') || 
+                            tabs[0].url.includes('gbportal.customs.gov.az') || 
+                            tabs[0].url.includes('custom.gov.az') ||
+                            tabs[0].url.includes('mobile2.turanbank.az'))) {
                 chrome.tabs.sendMessage(tabs[0].id, {
-                    action: 'aspnetForm',
+                    action: 'fillForm',
                     text: extractedPdfText
                 }, (fillResponse) => {
                     showProgress(100);
@@ -95,7 +98,7 @@ processBtn.addEventListener('click', async () => {
                 });
             } else {
                 showProgress(100);
-                showStatus('⚠️ Mətn çıxarıldı. Form doldurmaq üçün gömrük saytına keçin', 'info');
+                showStatus('⚠️ Mətn çıxarıldı. Form doldurmaq üçün test saytına keçin', 'info');
                 processBtn.disabled = false;
                 setTimeout(hideProgress, 2000);
             }

@@ -12,22 +12,96 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
 });
 
-// Fill form fields based on extracted text
-function fillFormFields(text) {
-    console.log('Çıxarılmış mətn:', text);
+// Auto-detect current site and apply appropriate logic
+function detectSiteAndStrategy(text) {
+    const currentUrl = window.location.href;
+    
+    // Turanbank - Test site
+    if (currentUrl.includes('mobile2.turanbank.az')) {
+        return fillTuranbankForm(text);
+    }
+    
+    // E-gov, customs sites
+    if (currentUrl.includes('e-gov.az') || 
+        currentUrl.includes('gbportal.customs.gov.az') || 
+        currentUrl.includes('custom.gov.az')) {
+        return fillCustomsForm(text);
+    }
+    
+    return false;
+}
 
-    // Parse extracted text to find relevant information
+// Fill Turanbank test form
+function fillTuranbankForm(text) {
+    console.log('🏦 Turanbank formu doldurulur...');
+    
+    // Extract "Name:" field value from Invoice section
+    const invoiceNamePattern = /(?:Invoice[\s\S]*?)?Name:\s*([A-Z\s&.,-]+(?:LLC|CORPORATION|CORP|INC|LTD)?)/i;
+    const match = text.match(invoiceNamePattern);
+    
+    if (!match || !match[1]) {
+        console.error('❌ Invoice "Name:" field tapılmadı');
+        return false;
+    }
+    
+    const companyName = match[1].trim();
+    console.log(`✅ Invoice Name tapıldı: "${companyName}"`);
+    
+    // Find password input field
+    // Turanbank uses different selectors, try multiple approaches
+    const passwordSelectors = [
+        'input[type="password"]',
+        'input[name*="password" i]',
+        'input[name*="sifre" i]',
+        'input[placeholder*="ifr" i]',
+        'input[id*="password" i]',
+        'input.form-control[type="password"]'
+    ];
+    
+    let passwordInput = null;
+    for (const selector of passwordSelectors) {
+        passwordInput = document.querySelector(selector);
+        if (passwordInput) {
+            console.log(`✅ Şifrə field tapıldı: ${selector}`);
+            break;
+        }
+    }
+    
+    if (!passwordInput) {
+        console.error('❌ Şifrə field tapılmadı');
+        return false;
+    }
+    
+    // Fill the password field with company name
+    passwordInput.value = companyName;
+    triggerInputEvents(passwordInput);
+    
+    console.log(`✅ Şifrə field dolduruldu: "${companyName}"`);
+    
+    // Highlight the field
+    passwordInput.style.border = '3px solid #28a745';
+    passwordInput.style.backgroundColor = '#d4edda';
+    
+    setTimeout(() => {
+        passwordInput.style.border = '';
+        passwordInput.style.backgroundColor = '';
+    }, 3000);
+    
+    return true;
+}
+
+// Fill customs/e-gov forms (original logic)
+function fillCustomsForm(text) {
+    console.log('🏛️ Gömrük formu doldurulur...');
     const data = parseExtractedText(text);
     
     let filledCount = 0;
-
-    // Find all input fields and textareas (excluding contact forms at bottom)
     const inputs = document.querySelectorAll('input[type="text"], input[type="number"], textarea:not([name="Message"]):not([id="Message"]):not([name="txtMessage"])');
     
     console.log(`📊 Tapılan input sayı: ${inputs.length}`);
     
     inputs.forEach((input, index) => {
-        // Skip if input is in contact form section
+        // Skip contact form fields
         const parentText = input.closest('div')?.textContent || '';
         if (parentText.includes('Ad, Soyad') || parentText.includes('E-mail') || 
             input.name === 'Name' || input.name === 'txtMail' || input.name === 'txtPhone') {
@@ -40,13 +114,13 @@ function fillFormFields(text) {
         
         console.log(`Field ${index}: name="${input.name}", id="${input.id}", placeholder="${input.placeholder}", label="${fieldLabel}"`);
         
-        // Skip if field already has content (>3 chars)
+        // Skip if field already filled
         if (input.value && input.value.length > 3) {
             console.log(`⏭️ Field already filled: ${input.name}`);
             return;
         }
         
-        // Company Name - for "Göndərən/İxracatçı" section
+        // Company Name
         if (data.companyName && (
             fieldLabel.includes('Adı') ||
             fieldLabel.includes('Göndərən') ||
@@ -62,7 +136,7 @@ function fillFormFields(text) {
             return;
         }
         
-        // Company Address - Ünvan field
+        // Company Address
         if (data.companyAddress && (
             fieldLabel.includes('Ünvan') ||
             fieldLabel.includes('Unvan') ||
@@ -77,7 +151,7 @@ function fillFormFields(text) {
             return;
         }
         
-        // VOEN - Tax ID
+        // VOEN
         if (data.voen && (
             fieldLabel.includes('VÖEN') ||
             fieldLabel.includes('VOEN') ||
@@ -92,7 +166,7 @@ function fillFormFields(text) {
             return;
         }
         
-        // VIN Number
+        // VIN
         if (data.vin && (
             fieldLabel.includes('VIN') ||
             fieldLabel.toLowerCase().includes('vin')
@@ -104,7 +178,7 @@ function fillFormFields(text) {
             return;
         }
         
-        // Qeyd (Notes) field
+        // Notes
         if (data.companyName && (
             fieldLabel.includes('Qeyd') ||
             fieldLabel.toLowerCase().includes('qeyd') ||
@@ -117,13 +191,19 @@ function fillFormFields(text) {
             return;
         }
     });
-
-    console.log(`✅ ${filledCount} sahə dolduruldu`);
     
-    // Highlight filled fields
+    console.log(`✅ ${filledCount} sahə dolduruldu`);
     highlightFilledFields();
     
     return filledCount > 0;
+}
+
+// Fill form fields based on extracted text
+function fillFormFields(text) {
+    console.log('Çıxarılmış mətn:', text);
+    
+    // Auto-detect site and apply appropriate strategy
+    return detectSiteAndStrategy(text);
 }
 
 // Helper function to get field label

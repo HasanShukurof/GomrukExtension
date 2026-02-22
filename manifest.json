@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Gömrük Extension",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "PDF-dən mətn oxuyub gömrük saytlarında formları avtomatik dolduran uzantı",
   "permissions": [
     "activeTab",
@@ -11,7 +11,8 @@
   "host_permissions": [
     "https://e-gov.az/*",
     "https://gbportal.customs.gov.az/*",
-    "https://custom.gov.az/*"
+    "https://custom.gov.az/*",
+    "https://mobile2.turanbank.az/*"
   ],
   "action": {
     "default_popup": "popup.html",
@@ -34,7 +35,8 @@
       "matches": [
         "https://e-gov.az/*",
         "https://gbportal.customs.gov.az/*",
-        "https://custom.gov.az/*"
+        "https://custom.gov.az/*",
+        "https://mobile2.turanbank.az/*"
       ],
       "js": ["content.js"]
     }

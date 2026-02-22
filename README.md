@@ -1,14 +1,25 @@
 # 🏛️ Gömrük Extension
 
-Chrome extension for automatically filling customs forms on e-gov.az using OCR technology.
+Chrome extension for automatically filling customs forms using OCR technology.
 
 ## 🌟 Xüsusiyyətlər
 
-- 📄 PDF fayllarını yükləyir
+- 📄 PDF fayllarını yükləyir (həm text, həm scan edilmiş)
 - 🔍 Tesseract.js ilə OCR (Optical Character Recognition)
-- 📝 e-gov.az saytında formları avtomatik doldurur
+- 📝 Formları avtomatik doldurur
 - 🎨 Müasir və sadə istifadəçi interfeysi
 - ✨ Drag & Drop dəstəyi
+- 🧪 Test rejimi dəstəyi (Turanbank)
+
+## 🌐 Dəstəklənən Saytlar
+
+### Əsas Saytlar (Production):
+1. **E-gov.az** - `https://e-gov.az/*`
+2. **Gömrük Portal** - `https://gbportal.customs.gov.az/*`
+3. **Custom.gov.az** - `https://custom.gov.az/*`
+
+### Test Saytı:
+- **Turanbank** - `https://mobile2.turanbank.az/*` (Test üçün)
 
 ## 📦 Quraşdırma
 
@@ -19,17 +30,35 @@ Chrome extension for automatically filling customs forms on e-gov.az using OCR t
 
 ## 🚀 İstifadə
 
-1. Extension ikonasına klikləyin
-2. PDF faylını seçin və ya drag & drop edin
-3. "PDF-i Oxu və Doldur" düyməsinə basın
-4. Extension avtomatik olaraq mətn çıxaracaq və formu dolduracaq
+### Test Rejimi (Turanbank):
+1. Test saytını açın: https://mobile2.turanbank.az/login/individual/mobile
+2. Extension ikonasına klikləyin
+3. PDF faylını seçin (məsələn: `pdf scan.pdf`)
+4. "PDF-i Oxu və Doldur" düyməsinə basın
+5. Extension PDF-dən **Invoice → Name:** field-ini tapıb **Şifrə** xanasına yazacaq
+
+### Production Rejimi (Gömrük saytları):
+1. Gömrük saytlarından birini açın
+2. Extension ikonasına klikləyin
+3. PDF faylını seçin
+4. "PDF-i Oxu və Doldur" düyməsinə basın
+5. Extension formu avtomatik dolduracaq
+
+## 🔍 PDF-dən Çıxarılan Məlumatlar
+
+Extension aşağıdakı məlumatları tanıyır:
+- **Company Name** (Şirkət adı): "Name: GLB LOGISTICS CORPORATION"
+- **Address** (Ünvan): "30 N GOULD ST STE R, SHERIDAN WY 82801, USA"
+- **Tax ID / VOEN**: "99-0667903"
+- **VIN nömrəsi**: "5NPD84LF3JH249799"
+- **Invoice məlumatları**
 
 ## 📋 Fayllar
 
-- `manifest.json` - Extension konfiqurasiyası
+- `manifest.json` - Extension konfiqurasiyası (v1.2.0)
 - `popup.html` - İstifadəçi interfeysi
 - `popup.js` - UI məntiq və fayl idarəetməsi
-- `background.js` - PDF oxuma və OCR prosesi
+- `background.js` - Background service worker
 - `content.js` - Web səhifə ilə əlaqə və form doldurma
 
 ## 🔧 Texnologiyalar
@@ -42,23 +71,35 @@ Chrome extension for automatically filling customs forms on e-gov.az using OCR t
 
 ## ⚠️ Qeydlər
 
-- Extension yalnız e-gov.az saytında işləyir
+- Extension həm text, həm scan edilmiş PDF-ləri oxuyur
+- Test üçün Turanbank saytı istifadə olunur
+- Production-da əsas gömrük saytlarında işləyəcək
 - PDF faylları təmiz və oxunaqlı olmalıdır
-- OCR prosesi internetə bağlıdır (CDN-dən kitabxanalar yüklənir)
 
-## 🎨 İkonlar
+## 🧪 Test Prosesi
 
-Extension hazırda standart ikonlar istifadə edir. Öz ikonlarınızı əlavə etmək üçün:
+1. **Hazırlıq:**
+   - Test saytı: Turanbank login page
+   - Test PDF: Invoice sənədləri olan PDF (scan edilmiş)
 
-1. `icons` qovluğu yaradın
-2. 16x16, 48x48 və 128x128 ölçülərində PNG formatında ikonlar əlavə edin
+2. **Test Addımları:**
+   - PDF yüklə → OCR oxu → "Name:" field tap → Şifrə xanasına yaz
 
-## 📝 Lisenziya
+3. **Uğur Kriteriyası:**
+   - ✅ PDF-dən mətn düzgün çıxarılır
+   - ✅ "Name:" field tapılır
+   - ✅ Şifrə xanası avtomatik doldurulur
 
-Bu proyekt şəxsi istifadə üçün nəzərdə tutulub.
+4. **Production Keçid:**
+   - Test successful olduqdan sonra əsas gömrük saytlarında tətbiq ediləcək
+
+## 📝 Versiya
+
+**v1.2.0** - Test rejimi (Turanbank dəstəyi)
 
 ## 👨‍💻 Müəllif
 
 Created with ❤️ for Azerbaijani customs users
+
 
 
