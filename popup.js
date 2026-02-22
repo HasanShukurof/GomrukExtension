@@ -350,158 +350,110 @@ function fixAzerbaijaniOCR(text) {
     return fixed;
 }
 
-// This function is injected directly into the page when content.js is not available
+// This function is injected directly into the page - must be fully self-contained
 function injectAndFill(extractedText) {
     const currentUrl = window.location.href;
     console.log('🚀 Direct inject: form doldurulur...', currentUrl);
 
-    function triggerReactEvents(input, value) {
-        const nativeInputSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-        if (nativeInputSetter && nativeInputSetter.set) {
-            nativeInputSetter.set.call(input, value);
+    function triggerEvents(input, value) {
+        const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+        if (nativeSetter && nativeSetter.set) {
+            nativeSetter.set.call(input, value);
         } else {
             input.value = value;
         }
-        ['focus', 'input', 'change', 'keydown', 'keyup', 'blur'].forEach(eventName => {
-            input.dispatchEvent(new Event(eventName, { bubbles: true }));
+        ['focus', 'input', 'change', 'keydown', 'keyup', 'blur'].forEach(ev => {
+            input.dispatchEvent(new Event(ev, { bubbles: true }));
         });
     }
 
-    // Turanbank: fill password field with Invoice Name value
+    function highlight(input) {
+        input.style.border = '3px solid #28a745';
+        input.style.backgroundColor = '#d4edda';
+        setTimeout(() => {
+            input.style.border = '';
+            input.style.backgroundColor = '';
+        }, 3000);
+    }
+
+    // ── TURANBANK ──────────────────────────────────────────────────────────────
     if (currentUrl.includes('mobile2.turanbank.az')) {
-        // Lazy match - stops exactly at the company suffix (CORPORATION, LLC, etc.)
         const nameMatch = extractedText.match(/Name[:\s]+([A-Z][A-Z\s&.,'-]+?(?:LLC|CORPORATION|CORP|INC|LTD))/i);
         if (!nameMatch) {
-            console.error('❌ Invoice "Name:" tapılmadı. Mətn:', extractedText.substring(0, 500));
+            console.error('❌ Invoice "Name:" tapılmadı');
             return false;
         }
         const companyName = nameMatch[1].trim();
-        console.log(`✅ Invoice Name: "${companyName}"`);
-
         const passwordInput = document.querySelector('input[type="password"]');
-        if (!passwordInput) {
-            console.error('❌ Şifrə input tapılmadı');
-            return false;
-        }
-
-        triggerReactEvents(passwordInput, companyName);
-        passwordInput.style.border = '3px solid #28a745';
-        passwordInput.style.backgroundColor = '#d4edda';
-        setTimeout(() => {
-            passwordInput.style.border = '';
-            passwordInput.style.backgroundColor = '';
-        }, 3000);
-
-        console.log(`✅ Şifrə field dolduruldu: "${companyName}"`);
+        if (!passwordInput) { console.error('❌ Şifrə input tapılmadı'); return false; }
+        triggerEvents(passwordInput, companyName);
+        highlight(passwordInput);
+        console.log(`✅ Şifrə → "${companyName}"`);
         return true;
     }
 
-    // e-gov.az, gbportal.customs.gov.az, custom.gov.az - customs forms
+    // ── E-GOV.AZ / CUSTOMS ────────────────────────────────────────────────────
     if (currentUrl.includes('e-gov.az') ||
         currentUrl.includes('gbportal.customs.gov.az') ||
         currentUrl.includes('custom.gov.az')) {
-        return fillEGovForm(extractedText, triggerReactEvents);
+
+        // Parse PDF text - only company name and address (NOT VÖEN)
+        const nameMatch = extractedText.match(/Name[:\s]+([A-Z][A-Z\s&.,'-]+?(?:LLC|CORPORATION|CORP|INC|LTD))/i);
+        const companyName = nameMatch ? nameMatch[1].trim() : null;
+
+        const addrMatch = extractedText.match(/(?:COMPANY\s+Add(?:ress|Tes+)[:\s]+)([^\n]{5,})/i);
+        const companyAddress = addrMatch ? addrMatch[1].trim() : null;
+
+        console.log('📦 Məlumatlar:', { companyName, companyAddress });
+
+        // Find the "2.Göndərən/İxracatçı" section container
+        let senderSection = null;
+        for (const el of document.querySelectorAll('td, th, div, span, b, strong')) {
+            const t = (el.innerText || '').trim();
+            if ((t.includes('2.Göndərən') || t.includes('Göndərən/İxracatçı')) && el.children.length < 4) {
+                senderSection = el.closest('table') || el.closest('div') || el.parentElement;
+                break;
+            }
+        }
+        console.log('📌 Göndərən bölməsi:', senderSection ? 'tapıldı' : 'tapılmadı');
+
+        // Fill a field by matching its label text within a container
+        function fillByLabel(container, labelTexts, value) {
+            if (!value) return false;
+            const scope = container || document;
+            for (const cell of scope.querySelectorAll('td, th, label, span, b')) {
+                const cellText = (cell.innerText || '').trim();
+                if (!labelTexts.includes(cellText)) continue;
+
+                // Look for input in next sibling or parent's next sibling
+                const candidates = [
+                    cell.nextElementSibling,
+                    cell.parentElement?.nextElementSibling,
+                    cell.closest('tr')?.querySelector('input, textarea'),
+                ];
+                for (const cand of candidates) {
+                    if (!cand) continue;
+                    const inp = cand.tagName === 'INPUT' || cand.tagName === 'TEXTAREA'
+                        ? cand
+                        : cand.querySelector('input:not([type="hidden"]):not([type="button"]), textarea');
+                    if (inp && !inp.disabled && !inp.readOnly) {
+                        triggerEvents(inp, value);
+                        highlight(inp);
+                        console.log(`✅ "${cellText}" → "${value}"`);
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        let filled = 0;
+        if (fillByLabel(senderSection, ['Adı'], companyName)) filled++;
+        if (fillByLabel(senderSection, ['Ünvan', 'Unvan'], companyAddress)) filled++;
+
+        console.log(`✅ ${filled} sahə dolduruldu`);
+        return filled > 0;
     }
 
     return false;
-}
-
-// Fill e-gov.az ASP.NET customs form
-function fillEGovForm(text, triggerFn) {
-    console.log('🏛️ e-gov.az formu doldurulur...');
-
-    // --- Parse data from PDF text ---
-    const companyNameMatch = text.match(/Name[:\s]+([A-Z][A-Z\s&.,'-]+?(?:LLC|CORPORATION|CORP|INC|LTD))/i);
-    const companyName = companyNameMatch ? companyNameMatch[1].trim() : null;
-
-    const addressMatch = text.match(/(?:COMPANY\s+Add(?:ress|Tes+)[:\s]+)([^\n]{5,})/i);
-    const companyAddress = addressMatch ? addressMatch[1].trim() : null;
-
-    const voenMatch = text.match(/Tax\s+ID[:\s]+([0-9-]{5,})/i);
-    const voen = voenMatch ? voenMatch[1].trim() : null;
-
-    console.log('📦 Məlumatlar:', { companyName, companyAddress, voen });
-
-    // --- Find the "2.Göndərən/İxracatçı" section first, then fill within it ---
-    function findSectionByTitle(titles) {
-        const allElements = document.querySelectorAll('*');
-        for (const el of allElements) {
-            const t = el.innerText?.trim() || '';
-            if (titles.some(title => t.includes(title)) && el.children.length < 5) {
-                // Return the closest table or container that holds the section
-                return el.closest('table, div, fieldset, tbody') || el.parentElement;
-            }
-        }
-        return null;
-    }
-
-    // Fill input near a label text WITHIN a given container
-    function fillInContainer(container, labelTexts, value) {
-        if (!value || !container) return false;
-        const cells = container.querySelectorAll('td, th, label, span');
-        for (const cell of cells) {
-            const cellText = cell.innerText?.trim() || '';
-            if (!labelTexts.some(lbl => cellText === lbl)) continue;
-
-            const candidates = [
-                cell.nextElementSibling,
-                cell.parentElement?.nextElementSibling,
-            ];
-            for (const cand of candidates) {
-                if (!cand) continue;
-                const input = cand.querySelector('input[type="text"], input:not([type="hidden"]):not([type="button"]):not([type="submit"]), textarea');
-                if (input) {
-                    triggerFn(input, value);
-                    input.style.border = '3px solid #28a745';
-                    setTimeout(() => { input.style.border = ''; }, 3000);
-                    console.log(`✅ "${cellText}" → "${value}"`);
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    // Find "2.Göndərən/İxracatçı" section
-    const senderSection = findSectionByTitle(['2.Göndərən', 'Göndərən/İxracatçı', '2.Gönd']);
-    console.log('📌 Göndərən bölməsi:', senderSection ? 'tapıldı' : 'tapılmadı');
-
-    let filledCount = 0;
-
-    if (senderSection) {
-        if (fillInContainer(senderSection, ['Adı'], companyName)) filledCount++;
-        if (fillInContainer(senderSection, ['Ünvan', 'Unvan'], companyAddress)) filledCount++;
-        if (fillInContainer(senderSection, ['VÖEN', 'VOEN'], voen)) filledCount++;
-    } else {
-        // Fallback: scan entire page but skip already-filled inputs
-        const allCells = document.querySelectorAll('td, th, label');
-        const targets = [
-            { labels: ['Adı'], value: companyName },
-            { labels: ['Ünvan', 'Unvan'], value: companyAddress },
-            { labels: ['VÖEN', 'VOEN'], value: voen },
-        ];
-        let firstMatch = true;
-        for (const cell of allCells) {
-            const cellText = cell.innerText?.trim() || '';
-            for (const target of targets) {
-                if (!target.value) continue;
-                if (!target.labels.includes(cellText)) continue;
-                const row = cell.parentElement;
-                const input = row?.nextElementSibling?.querySelector('input, textarea') ||
-                              cell.nextElementSibling?.querySelector('input, textarea');
-                if (input && !input.value && firstMatch) {
-                    triggerFn(input, target.value);
-                    input.style.border = '3px solid #28a745';
-                    setTimeout(() => { input.style.border = ''; }, 3000);
-                    console.log(`✅ fallback "${cellText}" → "${target.value}"`);
-                    filledCount++;
-                    firstMatch = false;
-                    break;
-                }
-            }
-        }
-    }
-
-    console.log(`✅ Toplam ${filledCount} sahə dolduruldu`);
-    return filledCount > 0;
 }
