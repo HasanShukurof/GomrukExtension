@@ -78,30 +78,52 @@ processBtn.addEventListener('click', async () => {
         extractedText.classList.add('show');
 
         // Send extracted text to content script
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            if (tabs[0] && (tabs[0].url.includes('e-gov.az') || 
-                            tabs[0].url.includes('gbportal.customs.gov.az') || 
-                            tabs[0].url.includes('custom.gov.az') ||
-                            tabs[0].url.includes('mobile2.turanbank.az'))) {
-                chrome.tabs.sendMessage(tabs[0].id, {
-                    action: 'fillForm',
-                    text: extractedPdfText
-                }, (fillResponse) => {
+        chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+            const tab = tabs[0];
+            const supportedSites = ['e-gov.az', 'gbportal.customs.gov.az', 'custom.gov.az', 'mobile2.turanbank.az'];
+            const isSupported = tab && supportedSites.some(site => tab.url.includes(site));
+
+            if (!isSupported) {
+                showProgress(100);
+                showStatus('⚠️ Mətn çıxarıldı. Dəstəklənən sayta keçin', 'info');
+                processBtn.disabled = false;
+                setTimeout(hideProgress, 2000);
+                return;
+            }
+
+            // First try sendMessage to content.js
+            chrome.tabs.sendMessage(tab.id, { action: 'fillForm', text: extractedPdfText }, async (fillResponse) => {
+                // If content.js not loaded (receiving end does not exist), inject directly
+                if (chrome.runtime.lastError || !fillResponse) {
+                    console.log('Content script not found, injecting directly...');
+                    try {
+                        const results = await chrome.scripting.executeScript({
+                            target: { tabId: tab.id },
+                            func: injectAndFill,
+                            args: [extractedPdfText]
+                        });
+                        showProgress(100);
+                        const success = results && results[0] && results[0].result;
+                        if (success) {
+                            showStatus('✅ Form uğurla dolduruldu!', 'success');
+                        } else {
+                            showStatus('⚠️ Form doldurula bilmədi. Console-u yoxlayın', 'error');
+                        }
+                    } catch (err) {
+                        console.error('Script inject xətası:', err);
+                        showStatus(`⚠️ Xəta: ${err.message}`, 'error');
+                    }
+                } else {
                     showProgress(100);
-                    if (fillResponse && fillResponse.success) {
+                    if (fillResponse.success) {
                         showStatus('✅ Form uğurla dolduruldu!', 'success');
                     } else {
                         showStatus('⚠️ Mətn çıxarıldı, ancaq form doldurula bilmədi', 'error');
                     }
-                    processBtn.disabled = false;
-                    setTimeout(hideProgress, 2000);
-                });
-            } else {
-                showProgress(100);
-                showStatus('⚠️ Mətn çıxarıldı. Form doldurmaq üçün test saytına keçin', 'info');
+                }
                 processBtn.disabled = false;
                 setTimeout(hideProgress, 2000);
-            }
+            });
         });
     } catch (error) {
         showStatus(`Xəta: ${error.message}`, 'error');
@@ -282,8 +304,54 @@ async function processWithOCR(pdf) {
 
 // Simple PDF text extraction using browser APIs
 async function extractTextFromPDF(arrayBuffer) {
-    // This function is kept for reference but not used anymore
-    // We now use OCR with Tesseract.js
     console.log('Note: Using OCR instead of text extraction');
     return '';
+}
+
+// This function is injected directly into the page when content.js is not available
+function injectAndFill(extractedText) {
+    const currentUrl = window.location.href;
+    console.log('🚀 Direct inject: form doldurulur...', currentUrl);
+
+    function triggerReactEvents(input, value) {
+        const nativeInputSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+        if (nativeInputSetter && nativeInputSetter.set) {
+            nativeInputSetter.set.call(input, value);
+        } else {
+            input.value = value;
+        }
+        ['focus', 'input', 'change', 'keydown', 'keyup', 'blur'].forEach(eventName => {
+            input.dispatchEvent(new Event(eventName, { bubbles: true }));
+        });
+    }
+
+    // Turanbank: fill password field with Invoice Name value
+    if (currentUrl.includes('mobile2.turanbank.az')) {
+        const nameMatch = extractedText.match(/Name[:\s]+([A-Z][A-Z\s&.,'-]+(?:LLC|CORPORATION|CORP|INC|LTD|LOGISTICS)?[A-Z]*)/i);
+        if (!nameMatch) {
+            console.error('❌ Invoice "Name:" tapılmadı. Mətn:', extractedText.substring(0, 500));
+            return false;
+        }
+        const companyName = nameMatch[1].trim();
+        console.log(`✅ Invoice Name: "${companyName}"`);
+
+        const passwordInput = document.querySelector('input[type="password"]');
+        if (!passwordInput) {
+            console.error('❌ Şifrə input tapılmadı');
+            return false;
+        }
+
+        triggerReactEvents(passwordInput, companyName);
+        passwordInput.style.border = '3px solid #28a745';
+        passwordInput.style.backgroundColor = '#d4edda';
+        setTimeout(() => {
+            passwordInput.style.border = '';
+            passwordInput.style.backgroundColor = '';
+        }, 3000);
+
+        console.log(`✅ Şifrə field dolduruldu: "${companyName}"`);
+        return true;
+    }
+
+    return false;
 }
