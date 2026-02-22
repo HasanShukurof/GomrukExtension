@@ -219,8 +219,10 @@ async function processPDF(arrayBuffer) {
 
         // Try OCR with Tesseract
         try {
-            const ocrText = await processWithOCR(pdf);
-            if (ocrText && ocrText.trim().length > 50) {
+            const rawOcrText = await processWithOCR(pdf);
+            if (rawOcrText && rawOcrText.trim().length > 50) {
+                const ocrText = fixAzerbaijaniOCR(rawOcrText);
+                console.log('✅ Azərbaycan OCR düzəldilməsi tətbiq edildi');
                 return ocrText;
             }
         } catch (ocrError) {
@@ -248,22 +250,29 @@ async function processPDF(arrayBuffer) {
 // Try OCR processing (may fail due to Manifest V3 restrictions)
 async function processWithOCR(pdf) {
     try {
-        // Initialize Tesseract worker
+        // Use CDN for language data (eng + aze) for proper character recognition
+        const TESSDATA_CDN = 'https://cdn.jsdelivr.net/npm/@tesseract.js-data/aze_best@1.0.0/data/';
+        const ENG_CDN = 'https://tessdata.projectnaptha.com/4.0.0_fast/';
+
+        showStatus('Dil paketi yüklənir...', 'info');
+
         const worker = await Tesseract.createWorker({
             workerPath: chrome.runtime.getURL('libs/tesseract.min.js'),
             corePath: chrome.runtime.getURL('libs/tesseract-core/tesseract-core.wasm.js'),
-            langPath: chrome.runtime.getURL('libs/tesseract-core/'),
+            langPath: ENG_CDN,
             logger: m => {
                 if (m.status === 'recognizing text' && m.progress) {
                     const percent = Math.round(m.progress * 100);
                     showStatus(`OCR: ${percent}%`, 'info');
+                } else if (m.status === 'loading language traineddata') {
+                    showStatus('Dil faylı yüklənir...', 'info');
                 }
             }
         });
 
         await worker.loadLanguage('eng');
         await worker.initialize('eng');
-        console.log('✅ Tesseract hazırdır');
+        console.log('✅ Tesseract hazırdır (eng)');
 
         let allText = '';
 
@@ -306,6 +315,39 @@ async function processWithOCR(pdf) {
 async function extractTextFromPDF(arrayBuffer) {
     console.log('Note: Using OCR instead of text extraction');
     return '';
+}
+
+// Post-process OCR text to fix common Azerbaijani character recognition errors
+function fixAzerbaijaniOCR(text) {
+    const corrections = [
+        // Common uppercase substitutions
+        [/AZERBAYCAN|AZAREAYCAN|AZ[Ee]RBAYCAN/g,  'AZƏRBAYCAN'],
+        [/RESPUBLIKAS[Iİ]/g,                        'RESPUBLİKASI'],
+        [/D[Oo][Vv][Ll][Aa][Tt]/g,                 'DÖVLƏT'],
+        [/G[Oo][Mm][Rr][Uu][Kk]|G[O0]MR\{,K|GOMR[{(]K/g, 'GÖMRÜK'],
+        [/KOM[Iİ]T[Ee][Ss][Iİ]|[Oo]M[Ii]TAST/g,  'KOMİTƏSİ'],
+        [/M[Ee][Rr][Kk][Ee][Zz][Iİ]|MaRKazi/g,   'MƏRKƏZİ'],
+        [/XIDM[Ee]T[Iİ]/g,                         'XİDMƏTİ'],
+        [/B[Ee]YANNAM[Ee]/g,                        'BƏYANNAMƏ'],
+        [/G[Oo]NDaR[Ee]N/g,                        'GÖNDƏRƏNi'],
+        [/[Iİ]XRACATCI/g,                          'İXRACATÇI'],
+        [/UNVAN/g,                                  'ÜNVAN'],
+        // Common lowercase substitutions
+        [/azerbaycan|azareaycan/g,  'azərbaycan'],
+        [/dovlet|dovlat/g,          'dövlət'],
+        [/gomruk|gömruk/g,         'gömrük'],
+        [/komitesi/g,               'komitəsi'],
+        [/merkezi/g,                'mərkəzi'],
+        // Bracket/brace fixes that OCR confuses with letters
+        [/\{,/g, 'Ü'],
+        [/\{/g,  'Ə'],
+    ];
+
+    let fixed = text;
+    for (const [pattern, replacement] of corrections) {
+        fixed = fixed.replace(pattern, replacement);
+    }
+    return fixed;
 }
 
 // This function is injected directly into the page when content.js is not available
