@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Gömrük Extension",
-  "version": "1.2.8",
+  "version": "1.2.9",
   "description": "PDF-dən mətn oxuyub gömrük saytlarında formları avtomatik dolduran uzantı",
   "permissions": [
     "activeTab",
@@ -51,7 +51,7 @@
     }
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://tessdata.projectnaptha.com https://cdn.jsdelivr.net https://raw.githubusercontent.com"
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   }
 }
 

@@ -214,7 +214,7 @@ async function processPDF(arrayBuffer) {
                     console.log('✅ OCR mətn əlavə edildi');
                 }
             } catch (ocrErr) {
-                console.warn('⚠️ OCR xətası (davam edilir):', ocrErr.message);
+                console.error('⚠️ OCR xətası:', ocrErr, ocrErr?.message, ocrErr?.stack);
             }
         }
 
