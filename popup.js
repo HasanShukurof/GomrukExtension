@@ -327,7 +327,8 @@ function injectAndFill(extractedText) {
 
     // Turanbank: fill password field with Invoice Name value
     if (currentUrl.includes('mobile2.turanbank.az')) {
-        const nameMatch = extractedText.match(/Name[:\s]+([A-Z][A-Z\s&.,'-]+(?:LLC|CORPORATION|CORP|INC|LTD|LOGISTICS)?[A-Z]*)/i);
+        // Lazy match - stops exactly at the company suffix (CORPORATION, LLC, etc.)
+        const nameMatch = extractedText.match(/Name[:\s]+([A-Z][A-Z\s&.,'-]+?(?:LLC|CORPORATION|CORP|INC|LTD))/i);
         if (!nameMatch) {
             console.error('❌ Invoice "Name:" tapılmadı. Mətn:', extractedText.substring(0, 500));
             return false;

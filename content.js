@@ -35,8 +35,8 @@ function detectSiteAndStrategy(text) {
 function fillTuranbankForm(text) {
     console.log('🏦 Turanbank formu doldurulur...');
     
-    // Extract "Name:" field value from Invoice section
-    const invoiceNamePattern = /(?:Invoice[\s\S]*?)?Name:\s*([A-Z\s&.,-]+(?:LLC|CORPORATION|CORP|INC|LTD)?)/i;
+    // Lazy match - stops exactly at the company suffix (CORPORATION, LLC, etc.)
+    const invoiceNamePattern = /Name[:\s]+([A-Z][A-Z\s&.,'-]+?(?:LLC|CORPORATION|CORP|INC|LTD))/i;
     const match = text.match(invoiceNamePattern);
     
     if (!match || !match[1]) {
