@@ -261,7 +261,7 @@ async function processWithOCRPages(pdf, pageNumbers) {
     let worker;
     try {
         worker = await Tesseract.createWorker('eng', 1, {
-            corePath: chrome.runtime.getURL('libs/tesseract-core/tesseract-core.wasm.js'),
+            corePath: chrome.runtime.getURL('libs/tesseract-core/'),
             langPath: chrome.runtime.getURL('libs/tesseract-core/'),
             logger: m => {
                 if (m.status === 'recognizing text' && m.progress) {
