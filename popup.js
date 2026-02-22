@@ -328,7 +328,11 @@ function injectAndFill(extractedText) {
     console.log('🚀 Direct inject: form doldurulur...', currentUrl);
 
     function triggerEvents(input, value) {
-        const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+        // Must use the correct prototype: textarea has its own value setter
+        const proto = (input.tagName === 'TEXTAREA')
+            ? window.HTMLTextAreaElement.prototype
+            : window.HTMLInputElement.prototype;
+        const nativeSetter = Object.getOwnPropertyDescriptor(proto, 'value');
         if (nativeSetter && nativeSetter.set) {
             nativeSetter.set.call(input, value);
         } else {
