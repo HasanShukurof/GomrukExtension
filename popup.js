@@ -97,6 +97,36 @@ processBtn.addEventListener('click', async () => {
                 if (chrome.runtime.lastError || !fillResponse) {
                     console.log('Content script not found, injecting directly...');
                     try {
+                        // Step 1: Navigate to XİFİ tab so its iframe is loaded in DOM
+                        const tabUrl = tab.url || '';
+                        const isEgov = tabUrl.includes('e-gov.az') ||
+                                       tabUrl.includes('gbportal.customs.gov.az') ||
+                                       tabUrl.includes('custom.gov.az');
+                        if (isEgov) {
+                            showStatus('🔄 XİFİ bölməsinə keçilir...', 'info');
+                            await chrome.scripting.executeScript({
+                                target: { tabId: tab.id },
+                                func: () => {
+                                    // Find XİFİ nav link/tab by text and click it
+                                    const allEls = document.querySelectorAll('a, li, td, div, span');
+                                    for (const el of allEls) {
+                                        const t = (el.innerText || el.textContent || '').trim();
+                                        if (t === 'XİFİ' || t === 'XIFI') {
+                                            el.click();
+                                            console.log('🔄 XİFİ tabına keçildi');
+                                            return true;
+                                        }
+                                    }
+                                    console.log('ℹ️ XİFİ tab tapılmadı (artıq XİFİ-dədir?)');
+                                    return false;
+                                }
+                            });
+                            // Step 2: Wait for XİFİ iframe to finish loading
+                            await new Promise(resolve => setTimeout(resolve, 2000));
+                        }
+
+                        // Step 3: Fill form in all frames
+                        showStatus('📝 Form doldurulur...', 'info');
                         const results = await chrome.scripting.executeScript({
                             target: { tabId: tab.id, allFrames: true },
                             func: injectAndFill,
