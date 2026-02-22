@@ -239,28 +239,15 @@ async function processPDF(arrayBuffer) {
 async function processWithOCRPages(pdf, pageNumbers) {
     showStatus('OCR başladılır...', 'info');
 
-    // Root cause: Tesseract.js v5 internally creates new Worker(blob{importScripts(workerPath)}).
-    // Chrome MV3 blocks importScripts() with chrome-extension:// URLs from blob workers.
-    // Blob-to-blob importScripts also fails in Chrome extension context.
-    //
-    // Solution: Monkey-patch window.Worker to intercept Tesseract's blob worker creation
-    // and redirect it to tesseract-init-worker.js served as a direct chrome-extension:// URL.
-    // chrome-extension:// URL workers CAN freely importScripts other chrome-extension:// URLs.
-    const OriginalWorker = window.Worker;
-    const initWorkerUrl = chrome.runtime.getURL('libs/tesseract-init-worker.js');
-
-    window.Worker = function(src, opts) {
-        if (typeof src === 'string' && src.startsWith('blob:')) {
-            console.log('🔀 Blob worker → chrome-extension:// worker yönləndirilir');
-            return new OriginalWorker(initWorkerUrl, opts);
-        }
-        return new OriginalWorker(src, opts);
-    };
-    window.Worker.prototype = OriginalWorker.prototype;
-
+    // Root fix: tesseract.min.js module 676 (spawnWorker) has two paths:
+    //   workerBlobURL:true  → new Worker(blob{importScripts(workerPath)}) ← BLOCKED in Chrome MV3
+    //   workerBlobURL:false → new Worker(workerPath) directly             ← WORKS from chrome-extension://
+    // A chrome-extension:// URL Worker can freely importScripts other chrome-extension:// files.
     let worker;
     try {
         worker = await Tesseract.createWorker('eng', 1, {
+            workerBlobURL: false,
+            workerPath: chrome.runtime.getURL('libs/tesseract-worker.min.js'),
             corePath: chrome.runtime.getURL('libs/tesseract-core/'),
             langPath: chrome.runtime.getURL('libs/tesseract-core/'),
             logger: m => {
@@ -288,7 +275,6 @@ async function processWithOCRPages(pdf, pageNumbers) {
 
         return allText;
     } finally {
-        window.Worker = OriginalWorker;
         if (worker) await worker.terminate();
     }
 }
