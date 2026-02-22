@@ -172,73 +172,61 @@ function hideProgress() {
     progressBar.style.width = '0%';
 }
 
-// Process PDF - try text extraction first, then OCR if needed
+// Process PDF - per-page hybrid: PDF.js text + OCR for image-only pages
 async function processPDF(arrayBuffer) {
     try {
         showStatus('PDF yüklənir...', 'info');
         showProgress(20);
 
-        // Load PDF.js
         const pdfLib = window['pdfjs-dist/build/pdf'];
         pdfLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL('libs/pdf.worker.min.js');
 
-        // Load PDF
         const pdf = await pdfLib.getDocument({ data: arrayBuffer }).promise;
+        const totalPages = Math.min(pdf.numPages, 10);
         console.log(`📄 PDF yükləndi: ${pdf.numPages} səhifə`);
 
-        showStatus('Mətn çıxarılır...', 'info');
-        showProgress(40);
+        showStatus('Hər səhifə yoxlanılır...', 'info');
+        showProgress(30);
 
-        let allText = '';
-
-        // First, try to extract text (if PDF has text layer)
-        for (let pageNum = 1; pageNum <= Math.min(pdf.numPages, 10); pageNum++) {
-            const page = await pdf.getPage(pageNum);
-            const textContent = await page.getTextContent();
-
-            const pageText = textContent.items.map(item => item.str).join(' ');
-            allText += pageText + '\n\n';
-
-            showProgress(40 + (pageNum / pdf.numPages) * 50);
+        // Step 1: extract text from every page via PDF.js
+        const pageTexts = [];
+        for (let p = 1; p <= totalPages; p++) {
+            const page = await pdf.getPage(p);
+            const content = await page.getTextContent();
+            const t = content.items.map(i => i.str).join(' ').trim();
+            pageTexts.push({ pageNum: p, text: t, page });
+            console.log(`📄 Səhifə ${p}: ${t.length} xarakter (PDF.js)`);
         }
 
-        console.log(`📝 Çıxarılmış mətn uzunluğu: ${allText.length}`);
-        console.log(`📝 Mətn preview:`, allText.substring(0, 300));
+        // Step 2: identify image-only pages (< 30 meaningful chars)
+        const imagePagesNeeded = pageTexts.filter(p => p.text.length < 30);
+        console.log(`🔍 OCR lazım olan səhifələr: ${imagePagesNeeded.map(p => p.pageNum).join(', ') || 'yoxdur'}`);
 
-        // Check if we got meaningful text
-        if (allText.trim().length > 100) {
-            console.log('✅ PDF-də mətn layer tapıldı');
+        let allText = pageTexts.map(p => p.text).join('\n\n');
+
+        // Step 3: OCR only the image pages
+        if (imagePagesNeeded.length > 0) {
+            showStatus(`🔍 ${imagePagesNeeded.length} şəkil səhifəsi OCR edilir...`, 'info');
+            try {
+                const ocrText = await processWithOCRPages(pdf, imagePagesNeeded.map(p => p.pageNum));
+                if (ocrText) {
+                    allText += '\n\n' + ocrText;
+                    console.log('✅ OCR mətn əlavə edildi');
+                }
+            } catch (ocrErr) {
+                console.warn('⚠️ OCR xətası (davam edilir):', ocrErr.message);
+            }
+        }
+
+        allText = fixAzerbaijaniOCR(allText);
+        console.log(`📝 Ümumi mətn: ${allText.length} xarakter`);
+        console.log(`📝 Preview:`, allText.substring(0, 400));
+
+        if (allText.trim().length > 20) {
             showStatus('✅ Mətn çıxarıldı!', 'success');
             return allText;
         }
 
-        // If no text found, PDF is likely scanned - try OCR
-        console.log('⚠️ PDF mətn layer yoxdur, OCR cəhd edilir...');
-        showStatus('🔍 Scan edilmiş PDF, OCR işləyir...', 'info');
-        showProgress(50);
-
-        // Try OCR with Tesseract
-        try {
-            const rawOcrText = await processWithOCR(pdf);
-            if (rawOcrText && rawOcrText.trim().length > 50) {
-                const ocrText = fixAzerbaijaniOCR(rawOcrText);
-                console.log('✅ Azərbaycan OCR düzəldilməsi tətbiq edildi');
-                return ocrText;
-            }
-        } catch (ocrError) {
-            console.error('❌ OCR xətası:', ocrError);
-            // OCR failed, show helpful message
-            throw new Error(
-                'PDF scan edilmiş şəkildir və OCR Chrome Extension məhdudiyyətləri üzündən işləmir.\n\n' +
-                '✅ Həll yolu:\n' +
-                '1. PDF-i online OCR tool ilə text PDF-ə çevirin:\n' +
-                '   - https://www.onlineocr.net/\n' +
-                '   - https://www.ilovepdf.com/ocr_pdf\n' +
-                '2. Yaxud PDF-dəki məlumatları manual olaraq kopyalayıb yapışdırın'
-            );
-        }
-
-        // If both failed
         throw new Error('PDF-dən mətn çıxarıla bilmədi');
 
     } catch (error) {
@@ -247,68 +235,44 @@ async function processPDF(arrayBuffer) {
     }
 }
 
-// Try OCR processing (may fail due to Manifest V3 restrictions)
-async function processWithOCR(pdf) {
-    try {
-        // Use CDN for language data (eng + aze) for proper character recognition
-        const TESSDATA_CDN = 'https://cdn.jsdelivr.net/npm/@tesseract.js-data/aze_best@1.0.0/data/';
-        const ENG_CDN = 'https://tessdata.projectnaptha.com/4.0.0_fast/';
+// OCR only the specified page numbers
+async function processWithOCRPages(pdf, pageNumbers) {
+    const ENG_CDN = 'https://tessdata.projectnaptha.com/4.0.0_fast/';
+    showStatus('OCR başladılır...', 'info');
 
-        showStatus('Dil paketi yüklənir...', 'info');
-
-        const worker = await Tesseract.createWorker({
-            workerPath: chrome.runtime.getURL('libs/tesseract.min.js'),
-            corePath: chrome.runtime.getURL('libs/tesseract-core/tesseract-core.wasm.js'),
-            langPath: ENG_CDN,
-            logger: m => {
-                if (m.status === 'recognizing text' && m.progress) {
-                    const percent = Math.round(m.progress * 100);
-                    showStatus(`OCR: ${percent}%`, 'info');
-                } else if (m.status === 'loading language traineddata') {
-                    showStatus('Dil faylı yüklənir...', 'info');
-                }
+    const worker = await Tesseract.createWorker({
+        workerPath: chrome.runtime.getURL('libs/tesseract.min.js'),
+        corePath: chrome.runtime.getURL('libs/tesseract-core/tesseract-core.wasm.js'),
+        langPath: ENG_CDN,
+        logger: m => {
+            if (m.status === 'recognizing text' && m.progress) {
+                showStatus(`OCR: ${Math.round(m.progress * 100)}%`, 'info');
+            } else if (m.status === 'loading language traineddata') {
+                showStatus('Dil faylı yüklənir...', 'info');
             }
-        });
-
-        await worker.loadLanguage('eng');
-        await worker.initialize('eng');
-        console.log('✅ Tesseract hazırdır (eng)');
-
-        let allText = '';
-
-        // Process each page with OCR
-        for (let pageNum = 1; pageNum <= Math.min(pdf.numPages, 5); pageNum++) {
-            showStatus(`🔍 Səhifə ${pageNum} OCR...`, 'info');
-
-            const page = await pdf.getPage(pageNum);
-            const viewport = page.getViewport({ scale: 2.0 });
-
-            // Create canvas
-            const canvas = document.createElement('canvas');
-            const context = canvas.getContext('2d');
-            canvas.height = viewport.height;
-            canvas.width = viewport.width;
-
-            // Render PDF page to canvas
-            await page.render({
-                canvasContext: context,
-                viewport: viewport
-            }).promise;
-
-            // Run OCR
-            const { data: { text } } = await worker.recognize(canvas);
-            allText += text + '\n\n';
-
-            console.log(`✅ Səhifə ${pageNum} OCR:`, text.substring(0, 100));
         }
+    });
 
-        await worker.terminate();
-        return allText;
+    await worker.loadLanguage('eng');
+    await worker.initialize('eng');
+    console.log('✅ Tesseract hazırdır');
 
-    } catch (error) {
-        console.error('OCR error:', error);
-        throw error;
+    let allText = '';
+    for (const pageNum of pageNumbers) {
+        showStatus(`🔍 Səhifə ${pageNum} OCR...`, 'info');
+        const page = await pdf.getPage(pageNum);
+        const viewport = page.getViewport({ scale: 2.0 });
+        const canvas = document.createElement('canvas');
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+        await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+        const { data: { text } } = await worker.recognize(canvas);
+        allText += `\n\n--- Səhifə ${pageNum} ---\n` + text;
+        console.log(`✅ Səhifə ${pageNum} OCR (${text.length} xarakter):`, text.substring(0, 150));
     }
+
+    await worker.terminate();
+    return allText;
 }
 
 // Simple PDF text extraction using browser APIs
