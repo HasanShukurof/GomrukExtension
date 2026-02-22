@@ -239,13 +239,22 @@ async function processPDF(arrayBuffer) {
 async function processWithOCRPages(pdf, pageNumbers) {
     showStatus('OCR başladılır...', 'info');
 
-    // Root fix: tesseract.min.js module 676 (spawnWorker) has two paths:
-    //   workerBlobURL:true  → new Worker(blob{importScripts(workerPath)}) ← BLOCKED in Chrome MV3
-    //   workerBlobURL:false → new Worker(workerPath) directly             ← WORKS from chrome-extension://
-    // A chrome-extension:// URL Worker can freely importScripts other chrome-extension:// files.
+    // Fix 1: workerBlobURL:false → worker created directly from chrome-extension:// URL (not blob)
+    //         A chrome-extension:// worker can importScripts other chrome-extension:// files.
+    // Fix 2: Pre-fetch eng.traineddata in popup context (fetch works here), write it to
+    //         worker's in-memory FS — bypasses fetch() from worker context which fails.
+    showStatus('Dil məlumatı yüklənir...', 'info');
+    const langDataUrl = chrome.runtime.getURL('libs/tesseract-core/eng.traineddata');
+    const langDataRes = await fetch(langDataUrl);
+    if (!langDataRes.ok) throw new Error(`eng.traineddata fetch xətası: ${langDataRes.status}`);
+    const langDataBuf = await langDataRes.arrayBuffer();
+    const langDataArr = new Uint8Array(langDataBuf);
+    console.log(`✅ eng.traineddata yükləndi: ${langDataArr.byteLength} bayt`);
+
     let worker;
     try {
-        worker = await Tesseract.createWorker('eng', 1, {
+        // Create worker with empty lang list (no automatic fetch of traineddata)
+        worker = await Tesseract.createWorker([], 1, {
             workerBlobURL: false,
             workerPath: chrome.runtime.getURL('libs/tesseract-worker.min.js'),
             corePath: chrome.runtime.getURL('libs/tesseract-core/'),
@@ -256,6 +265,11 @@ async function processWithOCRPages(pdf, pageNumbers) {
                 }
             }
         });
+
+        // Write pre-fetched traineddata directly to worker's in-memory filesystem
+        await worker.writeText('/tessdata/eng.traineddata', langDataArr);
+        // Initialize Tesseract with the pre-written language data
+        await worker.reinitialize('eng', 1);
 
         console.log('✅ Tesseract v5 hazırdır');
 
