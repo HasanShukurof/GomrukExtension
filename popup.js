@@ -396,5 +396,112 @@ function injectAndFill(extractedText) {
         return true;
     }
 
+    // e-gov.az, gbportal.customs.gov.az, custom.gov.az - customs forms
+    if (currentUrl.includes('e-gov.az') ||
+        currentUrl.includes('gbportal.customs.gov.az') ||
+        currentUrl.includes('custom.gov.az')) {
+        return fillEGovForm(extractedText, triggerReactEvents);
+    }
+
     return false;
+}
+
+// Fill e-gov.az ASP.NET customs form
+function fillEGovForm(text, triggerFn) {
+    console.log('🏛️ e-gov.az formu doldurulur...');
+
+    // --- Parse data from PDF text ---
+    const companyNameMatch = text.match(/Name[:\s]+([A-Z][A-Z\s&.,'-]+?(?:LLC|CORPORATION|CORP|INC|LTD))/i);
+    const companyName = companyNameMatch ? companyNameMatch[1].trim() : null;
+
+    const addressMatch = text.match(/(?:COMPANY\s+Add(?:ress|Tes+)[:\s]+)([^\n]{5,})/i);
+    const companyAddress = addressMatch ? addressMatch[1].trim() : null;
+
+    const voenMatch = text.match(/Tax\s+ID[:\s]+([0-9-]{5,})/i);
+    const voen = voenMatch ? voenMatch[1].trim() : null;
+
+    console.log('📦 Məlumatlar:', { companyName, companyAddress, voen });
+
+    // --- Find the "2.Göndərən/İxracatçı" section first, then fill within it ---
+    function findSectionByTitle(titles) {
+        const allElements = document.querySelectorAll('*');
+        for (const el of allElements) {
+            const t = el.innerText?.trim() || '';
+            if (titles.some(title => t.includes(title)) && el.children.length < 5) {
+                // Return the closest table or container that holds the section
+                return el.closest('table, div, fieldset, tbody') || el.parentElement;
+            }
+        }
+        return null;
+    }
+
+    // Fill input near a label text WITHIN a given container
+    function fillInContainer(container, labelTexts, value) {
+        if (!value || !container) return false;
+        const cells = container.querySelectorAll('td, th, label, span');
+        for (const cell of cells) {
+            const cellText = cell.innerText?.trim() || '';
+            if (!labelTexts.some(lbl => cellText === lbl)) continue;
+
+            const candidates = [
+                cell.nextElementSibling,
+                cell.parentElement?.nextElementSibling,
+            ];
+            for (const cand of candidates) {
+                if (!cand) continue;
+                const input = cand.querySelector('input[type="text"], input:not([type="hidden"]):not([type="button"]):not([type="submit"]), textarea');
+                if (input) {
+                    triggerFn(input, value);
+                    input.style.border = '3px solid #28a745';
+                    setTimeout(() => { input.style.border = ''; }, 3000);
+                    console.log(`✅ "${cellText}" → "${value}"`);
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    // Find "2.Göndərən/İxracatçı" section
+    const senderSection = findSectionByTitle(['2.Göndərən', 'Göndərən/İxracatçı', '2.Gönd']);
+    console.log('📌 Göndərən bölməsi:', senderSection ? 'tapıldı' : 'tapılmadı');
+
+    let filledCount = 0;
+
+    if (senderSection) {
+        if (fillInContainer(senderSection, ['Adı'], companyName)) filledCount++;
+        if (fillInContainer(senderSection, ['Ünvan', 'Unvan'], companyAddress)) filledCount++;
+        if (fillInContainer(senderSection, ['VÖEN', 'VOEN'], voen)) filledCount++;
+    } else {
+        // Fallback: scan entire page but skip already-filled inputs
+        const allCells = document.querySelectorAll('td, th, label');
+        const targets = [
+            { labels: ['Adı'], value: companyName },
+            { labels: ['Ünvan', 'Unvan'], value: companyAddress },
+            { labels: ['VÖEN', 'VOEN'], value: voen },
+        ];
+        let firstMatch = true;
+        for (const cell of allCells) {
+            const cellText = cell.innerText?.trim() || '';
+            for (const target of targets) {
+                if (!target.value) continue;
+                if (!target.labels.includes(cellText)) continue;
+                const row = cell.parentElement;
+                const input = row?.nextElementSibling?.querySelector('input, textarea') ||
+                              cell.nextElementSibling?.querySelector('input, textarea');
+                if (input && !input.value && firstMatch) {
+                    triggerFn(input, target.value);
+                    input.style.border = '3px solid #28a745';
+                    setTimeout(() => { input.style.border = ''; }, 3000);
+                    console.log(`✅ fallback "${cellText}" → "${target.value}"`);
+                    filledCount++;
+                    firstMatch = false;
+                    break;
+                }
+            }
+        }
+    }
+
+    console.log(`✅ Toplam ${filledCount} sahə dolduruldu`);
+    return filledCount > 0;
 }
