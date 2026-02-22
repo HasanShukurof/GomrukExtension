@@ -235,11 +235,12 @@ async function processPDF(arrayBuffer) {
     }
 }
 
-// OCR only the specified page numbers
+// OCR only the specified page numbers (Tesseract.js v5 API)
 async function processWithOCRPages(pdf, pageNumbers) {
     showStatus('OCR başladılır...', 'info');
 
-    const worker = await Tesseract.createWorker({
+    // Tesseract.js v5: createWorker(lang, oem, options) - no loadLanguage/initialize needed
+    const worker = await Tesseract.createWorker('eng', 1, {
         workerPath: chrome.runtime.getURL('libs/tesseract.min.js'),
         corePath: chrome.runtime.getURL('libs/tesseract-core/tesseract-core.wasm.js'),
         langPath: chrome.runtime.getURL('libs/tesseract-core/'),
@@ -250,9 +251,7 @@ async function processWithOCRPages(pdf, pageNumbers) {
         }
     });
 
-    await worker.loadLanguage('eng');
-    await worker.initialize('eng');
-    console.log('✅ Tesseract hazırdır (local eng.traineddata)');
+    console.log('✅ Tesseract v5 hazırdır');
 
     let allText = '';
     for (const pageNum of pageNumbers) {
