@@ -98,12 +98,12 @@ processBtn.addEventListener('click', async () => {
                     console.log('Content script not found, injecting directly...');
                     try {
                         const results = await chrome.scripting.executeScript({
-                            target: { tabId: tab.id },
+                            target: { tabId: tab.id, allFrames: true },
                             func: injectAndFill,
                             args: [extractedPdfText]
                         });
                         showProgress(100);
-                        const success = results && results[0] && results[0].result;
+                        const success = results && results.some(r => r && r.result);
                         if (success) {
                             showStatus('✅ Form uğurla dolduruldu!', 'success');
                         } else {
@@ -372,65 +372,93 @@ function injectAndFill(extractedText) {
         // Log full OCR text for debugging
         console.log('📄 Tam OCR mətni:\n', extractedText);
 
-        // Try multiple patterns for company name (invoice/declaration formats)
+        // ── Company Name extraction ──────────────────────────────────────────────
+        // PDF format: "Bank Name : BANK OF AMERICA Name: GLB LOGISTICS CORPORATION SWIFT"
+        // We want the company (before SWIFT), not the bank name.
         let companyName = null;
         const namePatterns = [
-            /(?:Shipper|Seller|Exporter|Consignor|G[oö]nd[eə]r[eə]n)[:\s]+([^\n]{3,80})/i,
-            /(?:Company\s*Name|Firma\s*Ad[iı])[:\s]+([^\n]{3,80})/i,
-            /Name[:\s]+([^\n]{3,80})/i,
-            /(?:Sender|From)[:\s]+([^\n]{3,80})/i,
+            // "Name: COMPANY LLC/CORP/INC SWIFT" — stops at SWIFT/Account keyword
+            /Name\s*:\s*([\w][\w\s.,&'-]+?(?:LLC|CORP(?:ORATION)?|INC|LTD|CO\.|COMPANY|GROUP|TRADING|IMPORT|EXPORT))\s+(?:SWIFT|Account|Routing)/i,
+            // Shipper/Exporter/Sender fields (customs/invoice)
+            /(?:Shipper|Seller|Exporter|Consignor|G[oö]nd[eə]r[eə]n)\s*[:\-]\s*([^\n]{3,80})/i,
+            // "Company Name:" field
+            /(?:Company\s*Name|Firma\s*Ad[iı])\s*[:\-]\s*([^\n]{3,80})/i,
+            // Any line that is entirely a company name (has LLC/CORP/INC/LTD suffix)
+            /^([\w][\w\s.,&'-]+(?:LLC|CORP(?:ORATION)?|INC|LTD))\s*$/im,
         ];
         for (const pat of namePatterns) {
             const m = extractedText.match(pat);
-            if (m && m[1].trim().length > 2) { companyName = m[1].trim(); break; }
+            if (m && m[1] && m[1].trim().length > 2) { companyName = m[1].trim(); break; }
         }
 
-        // Try multiple patterns for address
+        // ── Company Address extraction ───────────────────────────────────────────
+        // PDF format: "COMPANY Address: 30 N GOULD ST STE R. SHERIDAN WY 82801 ,USA Tax ID: ..."
+        // We want just the street address, stopping before "Tax", "USA", etc.
         let companyAddress = null;
         const addrPatterns = [
-            /(?:Address|Adres|[UÜ]nvan)[:\s]+([^\n]{5,120})/i,
-            /(?:Street|City|Country)[:\s]+([^\n]{5,120})/i,
-            /(?:Location|Place)[:\s]+([^\n]{5,120})/i,
+            // "Address: ... USA" — capture everything up to (but not including) "Tax" or "AOLMINT"
+            /(?:COMPANY\s+)?Address\s*:\s*([^,\n]{5,100}(?:,\s*[A-Z]{2}\s+\d{5})?)\s*(?=,?\s*(?:USA|Tax\s|AOLMINT|$))/i,
+            // Fallback: "Address:" then trim at first comma+state or just 80 chars
+            /(?:Address|Adres|[UÜ]nvan)\s*[:\-]\s*([^\n]{5,80})/i,
+            /(?:Street|City)\s*[:\-]\s*([^\n]{5,80})/i,
         ];
         for (const pat of addrPatterns) {
             const m = extractedText.match(pat);
-            if (m && m[1].trim().length > 4) { companyAddress = m[1].trim(); break; }
+            if (m && m[1] && m[1].trim().length > 4) {
+                // Strip trailing noise: "Tax ID...", extra spaces
+                companyAddress = m[1].trim().replace(/\s*(,?\s*USA.*|Tax\s+ID.*)$/i, '').trim();
+                break;
+            }
         }
 
         console.log('📦 Məlumatlar:', { companyName, companyAddress });
 
-        // Find all label cells and their corresponding inputs on the page
-        // Strategy: find rows where label=target AND input is empty, pick first match
+        // ── Form field filling ───────────────────────────────────────────────────
+        // Searches for label text in ALL element types; checks siblings and parent row.
+        // Also logs all visible td/label elements so we can debug label mismatches.
         function fillFirstEmptyByLabel(labelTexts, value) {
             if (!value) return false;
-            for (const cell of document.querySelectorAll('td, th, label, span, b')) {
-                const cellText = (cell.innerText || '').trim();
-                if (!labelTexts.includes(cellText)) continue;
 
+            // Normalize for comparison: lowercase + collapse whitespace
+            const normalize = s => s.toLowerCase().replace(/\s+/g, ' ').trim();
+            const targets = labelTexts.map(normalize);
+
+            const allCells = document.querySelectorAll('td, th, label, span, b, div, p, li');
+            for (const cell of allCells) {
+                const raw = (cell.innerText || cell.textContent || '').trim();
+                const cellNorm = normalize(raw);
+
+                // Exact normalized match OR the cell text IS one of the targets
+                if (!targets.some(t => cellNorm === t || raw === t)) continue;
+
+                // Try next sibling, parent's next sibling, and any input inside parent row
                 const candidates = [
                     cell.nextElementSibling,
                     cell.parentElement?.nextElementSibling,
+                    cell.closest('tr')?.querySelector('input, textarea'),
                 ];
                 for (const cand of candidates) {
                     if (!cand) continue;
                     const inp = (cand.tagName === 'INPUT' || cand.tagName === 'TEXTAREA')
                         ? cand
                         : cand.querySelector('input:not([type="hidden"]):not([type="button"]):not([type="submit"]), textarea');
-                    if (inp && !inp.disabled && !inp.readOnly && !inp.value) {
+                    if (inp && !inp.disabled && !inp.readOnly && inp.value === '') {
                         triggerEvents(inp, value);
                         highlight(inp);
-                        console.log(`✅ "${cellText}" → "${value}"`);
+                        console.log(`✅ "${raw}" → "${value}"`);
                         return true;
                     }
                 }
             }
-            console.warn(`⚠️ Label tapılmadı: ${labelTexts}`);
+            // Debug: show what labels ARE visible on the page
+            const found = [...document.querySelectorAll('td, th, label')].map(el => `"${(el.innerText||'').trim()}"`).filter(s => s.length > 2 && s.length < 30).slice(0, 30);
+            console.warn(`⚠ Label tapılmadı: ${labelTexts} | Mövcud labellar: ${found.join(', ')}`);
             return false;
         }
 
         let filled = 0;
-        if (fillFirstEmptyByLabel(['Adı'], companyName)) filled++;
-        if (fillFirstEmptyByLabel(['Ünvan', 'Unvan'], companyAddress)) filled++;
+        if (fillFirstEmptyByLabel(['Adı', 'Ad\u0131', 'Adi'], companyName)) filled++;
+        if (fillFirstEmptyByLabel(['Ünvan', 'Unvan', '\u00DCnvan'], companyAddress)) filled++;
 
         console.log(`✅ ${filled} sahə dolduruldu`);
         return filled > 0;
