@@ -239,35 +239,59 @@ async function processPDF(arrayBuffer) {
 async function processWithOCRPages(pdf, pageNumbers) {
     showStatus('OCR başladılır...', 'info');
 
-    const worker = await Tesseract.createWorker('eng', 1, {
-        workerPath: chrome.runtime.getURL('libs/tesseract-worker.min.js'),
-        corePath: chrome.runtime.getURL('libs/tesseract-core/tesseract-core.wasm.js'),
-        langPath: chrome.runtime.getURL('libs/tesseract-core/'),
-        logger: m => {
-            if (m.status === 'recognizing text' && m.progress) {
-                showStatus(`OCR: ${Math.round(m.progress * 100)}%`, 'info');
+    // Chrome Extension MV3 blocks importScripts(chrome-extension://) from blob workers.
+    // Fix: fetch the worker script content, embed it inline as a blob URL.
+    // Tesseract will then call importScripts(ourBlobUrl) — blob→blob is same-origin, allowed.
+    const workerScriptUrl = chrome.runtime.getURL('libs/tesseract-worker.min.js');
+    const workerRes = await fetch(workerScriptUrl);
+    if (!workerRes.ok) throw new Error(`Worker fetch xətası: ${workerRes.status}`);
+    const workerContent = await workerRes.text();
+    const workerInlineBlob = new Blob([workerContent], { type: 'application/javascript' });
+    const workerInlineBlobUrl = URL.createObjectURL(workerInlineBlob);
+
+    // Similarly, fetch core WASM script and embed inline so blob worker can access it
+    const coreScriptUrl = chrome.runtime.getURL('libs/tesseract-core/tesseract-core.wasm.js');
+    const coreRes = await fetch(coreScriptUrl);
+    if (!coreRes.ok) throw new Error(`Core fetch xətası: ${coreRes.status}`);
+    const coreContent = await coreRes.text();
+    const coreInlineBlob = new Blob([coreContent], { type: 'application/javascript' });
+    const coreInlineBlobUrl = URL.createObjectURL(coreInlineBlob);
+
+    let worker;
+    try {
+        worker = await Tesseract.createWorker('eng', 1, {
+            workerPath: workerInlineBlobUrl,
+            corePath: coreInlineBlobUrl,
+            langPath: chrome.runtime.getURL('libs/tesseract-core/'),
+            logger: m => {
+                if (m.status === 'recognizing text' && m.progress) {
+                    showStatus(`OCR: ${Math.round(m.progress * 100)}%`, 'info');
+                }
             }
+        });
+
+        console.log('✅ Tesseract v5 hazırdır');
+
+        let allText = '';
+        for (const pageNum of pageNumbers) {
+            showStatus(`🔍 Səhifə ${pageNum} OCR...`, 'info');
+            const page = await pdf.getPage(pageNum);
+            const viewport = page.getViewport({ scale: 2.0 });
+            const canvas = document.createElement('canvas');
+            canvas.height = viewport.height;
+            canvas.width = viewport.width;
+            await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+            const { data: { text } } = await worker.recognize(canvas);
+            allText += `\n\n--- Səhifə ${pageNum} ---\n` + text;
+            console.log(`✅ Səhifə ${pageNum} OCR (${text.length} xarakter):`, text.substring(0, 150));
         }
-    });
 
-    console.log('✅ Tesseract v5 hazırdır');
-
-    let allText = '';
-    for (const pageNum of pageNumbers) {
-        showStatus(`🔍 Səhifə ${pageNum} OCR...`, 'info');
-        const page = await pdf.getPage(pageNum);
-        const viewport = page.getViewport({ scale: 2.0 });
-        const canvas = document.createElement('canvas');
-        canvas.height = viewport.height;
-        canvas.width = viewport.width;
-        await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
-        const { data: { text } } = await worker.recognize(canvas);
-        allText += `\n\n--- Səhifə ${pageNum} ---\n` + text;
-        console.log(`✅ Səhifə ${pageNum} OCR (${text.length} xarakter):`, text.substring(0, 150));
+        return allText;
+    } finally {
+        if (worker) await worker.terminate();
+        URL.revokeObjectURL(workerInlineBlobUrl);
+        URL.revokeObjectURL(coreInlineBlobUrl);
     }
-
-    await worker.terminate();
-    return allText;
 }
 
 // Simple PDF text extraction using browser APIs
