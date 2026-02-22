@@ -104,25 +104,24 @@ processBtn.addEventListener('click', async () => {
                                        tabUrl.includes('custom.gov.az');
                         if (isEgov) {
                             showStatus('🔄 XİFİ bölməsinə keçilir...', 'info');
+                            // allFrames:true — XİFİ nav tab is inside the gbportal iframe, not the main frame
                             await chrome.scripting.executeScript({
-                                target: { tabId: tab.id },
+                                target: { tabId: tab.id, allFrames: true },
                                 func: () => {
-                                    // Find XİFİ nav link/tab by text and click it
-                                    const allEls = document.querySelectorAll('a, li, td, div, span');
+                                    const allEls = document.querySelectorAll('a, li, td, div, span, button');
                                     for (const el of allEls) {
                                         const t = (el.innerText || el.textContent || '').trim();
                                         if (t === 'XİFİ' || t === 'XIFI') {
                                             el.click();
-                                            console.log('🔄 XİFİ tabına keçildi');
+                                            console.log('🔄 XİFİ tabına keçildi:', window.location.href);
                                             return true;
                                         }
                                     }
-                                    console.log('ℹ️ XİFİ tab tapılmadı (artıq XİFİ-dədir?)');
                                     return false;
                                 }
                             });
-                            // Step 2: Wait for XİFİ iframe to finish loading
-                            await new Promise(resolve => setTimeout(resolve, 2000));
+                            // Wait for XİFİ section content to render
+                            await new Promise(resolve => setTimeout(resolve, 2500));
                         }
 
                         // Step 3: Fill form in all frames
