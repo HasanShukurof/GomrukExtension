@@ -239,8 +239,8 @@ async function processPDF(arrayBuffer) {
 async function processWithOCRPages(pdf, pageNumbers) {
     showStatus('OCR başladılır...', 'info');
 
-    // Tesseract.js v5: NO workerPath (v5 creates worker internally via blob URL)
     const worker = await Tesseract.createWorker('eng', 1, {
+        workerPath: chrome.runtime.getURL('libs/tesseract-worker.min.js'),
         corePath: chrome.runtime.getURL('libs/tesseract-core/tesseract-core.wasm.js'),
         langPath: chrome.runtime.getURL('libs/tesseract-core/'),
         logger: m => {
