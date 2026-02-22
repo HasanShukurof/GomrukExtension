@@ -239,22 +239,12 @@ async function processPDF(arrayBuffer) {
 async function processWithOCRPages(pdf, pageNumbers) {
     showStatus('OCR başladılır...', 'info');
 
-    // Fix 1: workerBlobURL:false → worker created directly from chrome-extension:// URL (not blob)
-    //         A chrome-extension:// worker can importScripts other chrome-extension:// files.
-    // Fix 2: Pre-fetch eng.traineddata in popup context (fetch works here), write it to
-    //         worker's in-memory FS — bypasses fetch() from worker context which fails.
-    showStatus('Dil məlumatı yüklənir...', 'info');
-    const langDataUrl = chrome.runtime.getURL('libs/tesseract-core/eng.traineddata');
-    const langDataRes = await fetch(langDataUrl);
-    if (!langDataRes.ok) throw new Error(`eng.traineddata fetch xətası: ${langDataRes.status}`);
-    const langDataBuf = await langDataRes.arrayBuffer();
-    const langDataArr = new Uint8Array(langDataBuf);
-    console.log(`✅ eng.traineddata yükləndi: ${langDataArr.byteLength} bayt`);
-
+    // workerBlobURL:false → worker runs at chrome-extension:// URL directly.
+    // From a chrome-extension:// worker, fetch('chrome-extension://...') works fine,
+    // so standard createWorker('eng') with langPath works without any manual FS writes.
     let worker;
     try {
-        // Create worker with empty lang list (no automatic fetch of traineddata)
-        worker = await Tesseract.createWorker([], 1, {
+        worker = await Tesseract.createWorker('eng', 1, {
             workerBlobURL: false,
             workerPath: chrome.runtime.getURL('libs/tesseract-worker.min.js'),
             corePath: chrome.runtime.getURL('libs/tesseract-core/'),
@@ -265,11 +255,6 @@ async function processWithOCRPages(pdf, pageNumbers) {
                 }
             }
         });
-
-        // Write pre-fetched traineddata directly to worker's in-memory filesystem
-        await worker.writeText('/tessdata/eng.traineddata', langDataArr);
-        // Initialize Tesseract with the pre-written language data
-        await worker.reinitialize('eng', 1);
 
         console.log('✅ Tesseract v5 hazırdır');
 
@@ -379,12 +364,33 @@ function injectAndFill(extractedText) {
         currentUrl.includes('gbportal.customs.gov.az') ||
         currentUrl.includes('custom.gov.az')) {
 
-        // Parse PDF text - only company name and address (NOT VÖEN)
-        const nameMatch = extractedText.match(/Name[:\s]+([A-Z][A-Z\s&.,'-]+?(?:LLC|CORPORATION|CORP|INC|LTD))/i);
-        const companyName = nameMatch ? nameMatch[1].trim() : null;
+        // Log full OCR text for debugging
+        console.log('📄 Tam OCR mətni:\n', extractedText);
 
-        const addrMatch = extractedText.match(/(?:COMPANY\s+Add(?:ress|Tes+)[:\s]+)([^\n]{5,})/i);
-        const companyAddress = addrMatch ? addrMatch[1].trim() : null;
+        // Try multiple patterns for company name (invoice/declaration formats)
+        let companyName = null;
+        const namePatterns = [
+            /(?:Shipper|Seller|Exporter|Consignor|G[oö]nd[eə]r[eə]n)[:\s]+([^\n]{3,80})/i,
+            /(?:Company\s*Name|Firma\s*Ad[iı])[:\s]+([^\n]{3,80})/i,
+            /Name[:\s]+([^\n]{3,80})/i,
+            /(?:Sender|From)[:\s]+([^\n]{3,80})/i,
+        ];
+        for (const pat of namePatterns) {
+            const m = extractedText.match(pat);
+            if (m && m[1].trim().length > 2) { companyName = m[1].trim(); break; }
+        }
+
+        // Try multiple patterns for address
+        let companyAddress = null;
+        const addrPatterns = [
+            /(?:Address|Adres|[UÜ]nvan)[:\s]+([^\n]{5,120})/i,
+            /(?:Street|City|Country)[:\s]+([^\n]{5,120})/i,
+            /(?:Location|Place)[:\s]+([^\n]{5,120})/i,
+        ];
+        for (const pat of addrPatterns) {
+            const m = extractedText.match(pat);
+            if (m && m[1].trim().length > 4) { companyAddress = m[1].trim(); break; }
+        }
 
         console.log('📦 Məlumatlar:', { companyName, companyAddress });
 
